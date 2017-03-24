@@ -2,65 +2,54 @@ defmodule BunnyTest do
   use ExUnit.Case
   doctest Bunny
 
-  defmodule W1 do
-    use Bunny.Worker, queue: "bunny.test.q1"
+  defmodule OkWorker do
+    use Bunny.Worker, queue: "bunny.test.ok"
 
-    def perform(payload) do
-      send :bunny_test_01, {:resp, payload}
+    def process(payload) do
+      Monkey.send {:i_am_done, payload}
+      :ok
     end
   end
 
-  defmodule W2 do
-    use Bunny.Worker, queue: "bunny.test.q2"
+  defmodule ErrorWorker do
+    use Bunny.Worker, queue: "bunny.test.error"
 
-    def perform(payload) do
+    def process(payload) do
+      Monkey.send {:trying, payload}
       1/0
+      Monkey.send {:nope, payload}
     end
   end
 
   setup do
     # start with clean state
-    {:ok, conn} = AMQP.Connection.open
-    {:ok, ch} = AMQP.Channel.open(conn)
-
-    AMQP.Queue.delete(ch, "bunny.test.q1")
-    AMQP.Queue.delete(ch, "bunny.test.q1.retry")
-    AMQP.Queue.delete(ch, "bunny.test.q1.dead")
-
-    AMQP.Queue.delete(ch, "bunny.test.q2")
-    AMQP.Queue.delete(ch, "bunny.test.q2.retry")
-    AMQP.Queue.delete(ch, "bunny.test.q2.dead")
+    Monkey.delete_queues("bunny.test.ok")
+    Monkey.delete_queues("bunny.test.error")
+    Monkey.bind()
 
     # start Bunny
-    Bunny.start_link(workers: [W1, W2])
+    Bunny.start_link(workers: [OkWorker, ErrorWorker])
 
     :ok
   end
 
   test "connection process alive" do
-    assert Process.whereis(Bunny.Connection)
+    assert Process.alive?(Process.whereis(Bunny.Connection))
   end
 
-  test "worker process alive" do
-    assert Process.whereis(W1)
-    assert Process.whereis(W2)
+  test "worker processes alive" do
+    assert Process.alive?(Process.whereis(OkWorker))
+    assert Process.alive?(Process.whereis(ErrorWorker))
   end
 
   test "process message with success" do
-    {:ok, conn} = AMQP.Connection.open
-    {:ok, ch} = AMQP.Channel.open(conn)
-
-    Process.register(self(), :bunny_test_01)
-    AMQP.Basic.publish ch, "", "bunny.test.q1", "hello"
-
-    assert_receive {:resp, "hello"}
+    Monkey.publish "", "bunny.test.ok", "hello"
+    assert_receive {:i_am_done, "hello"}
   end
 
   test "process message with error" do
-    {:ok, conn} = AMQP.Connection.open
-    {:ok, ch} = AMQP.Channel.open(conn)
-
-    AMQP.Basic.publish ch, "", "bunny.test.q2", "nooooo"
-    # TODO: check retry queue message
+    Monkey.publish "", "bunny.test.error", "nooooo"
+    assert_receive {:trying, "nooooo"}
+    refute_receive {:nope, _}
   end
 end

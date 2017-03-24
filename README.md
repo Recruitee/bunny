@@ -29,7 +29,7 @@ If [available in Hex](https://hex.pm/docs/publish), the package can be installed
 defmodule EasyWorker do
   use Bunny.Worker, queue: "easy-jobs"
 
-  def perform(payload) do
+  def process(payload) do
     :ok
   end
 end
@@ -37,7 +37,7 @@ end
 defmodule HardWorker do
   use Bunny.Worker, queue: "hardcore-stuff"
 
-  def perform(payload) do
+  def process(payload) do
     1/0
   end
 end

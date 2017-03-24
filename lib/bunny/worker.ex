@@ -28,7 +28,7 @@ defmodule Bunny.Worker do
   ## CALLBACKS
 
   @default_prefetch_count 1
-  @default_retry_delay    10
+  @default_retry_delay    10_000 # 10s
   @default_retry_limit    5
   @default_job_timeout    60 * 60 * 1000 # 1h
 
@@ -94,7 +94,7 @@ defmodule Bunny.Worker do
     worker = self()
 
     pid = spawn_link fn ->
-      res = perform(state.module, payload, meta)
+      res = process(state.module, payload, meta)
       send worker, {:finished, self(), res, payload}
     end
 
@@ -141,8 +141,8 @@ defmodule Bunny.Worker do
   defp ok?({:ok, _}), do: true
   defp ok?(_), do: false
 
-  def perform(module, payload, meta) do
-    apply(module, :perform, [payload])
+  def process(module, payload, meta) do
+    apply(module, :process, [payload])
   rescue
     error ->
       trace = System.stacktrace
