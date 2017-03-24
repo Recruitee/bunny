@@ -6,7 +6,7 @@
 
 If [available in Hex](https://hex.pm/docs/publish), the package can be installed as:
 
-  1. Add `bunny` to your list of dependencies in `mix.exs`:
+1. Add `bunny` to your list of dependencies in `mix.exs`:
 
     ```elixir
     def deps do
@@ -14,7 +14,7 @@ If [available in Hex](https://hex.pm/docs/publish), the package can be installed
     end
     ```
 
-  2. Ensure `bunny` is started before your application:
+2. Ensure `bunny` is started before your application:
 
     ```elixir
     def application do
