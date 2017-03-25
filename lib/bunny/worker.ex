@@ -1,6 +1,6 @@
 defmodule Bunny.Worker do
   ## BEHAVIOUR SPEC
-  @callback process(payload :: binary) :: no_return
+  @callback process(payload :: binary, meta :: map) :: no_return
 
 
   ## UNNECESSARY MACRO SUGAR
@@ -53,8 +53,10 @@ defmodule Bunny.Worker do
 
     # create retry queue
     create_queue(ch, queue_retry, [
-      {"x-dead-letter-exchange",    :longstr, ""},
-      {"x-dead-letter-routing-key", :longstr, queue}
+      arguments: [
+        {"x-dead-letter-exchange",    :longstr, ""},
+        {"x-dead-letter-routing-key", :longstr, queue}
+      ]
     ])
 
     # create dead letters queue
@@ -114,7 +116,13 @@ defmodule Bunny.Worker do
       AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
     else
       # publish to retry queue
-      opts = [expiration: "#{state.retry_delay}", persistent: true]
+      opts = [
+        expiration: "#{state.retry_delay}",
+        persistent: true,
+        headers: [
+          x_bunny_retries: 1
+        ]
+      ]
       AMQP.Basic.publish(state.ch, "", state.queue_retry, payload, opts)
 
       # ack
@@ -142,7 +150,7 @@ defmodule Bunny.Worker do
   defp ok?(_), do: false
 
   def process(module, payload, meta) do
-    apply(module, :process, [payload])
+    apply(module, :process, [payload, meta])
   rescue
     error ->
       trace = System.stacktrace

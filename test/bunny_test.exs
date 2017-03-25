@@ -1,22 +1,23 @@
 defmodule BunnyTest do
-  use ExUnit.Case
-  doctest Bunny
+  use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
 
   defmodule OkWorker do
     use Bunny.Worker, queue: "bunny.test.ok"
 
-    def process(payload) do
+    def process(payload, _meta) do
       Monkey.send {:i_am_done, payload}
       :ok
     end
   end
 
   defmodule ErrorWorker do
-    use Bunny.Worker, queue: "bunny.test.error"
+    use Bunny.Worker, queue: "bunny.test.error",
+                      retry_delay: 0
 
-    def process(payload) do
+    def process(payload, _meta) do
       Monkey.send {:trying, payload}
-      1/0
+      _ = 1/0
       Monkey.send {:nope, payload}
     end
   end
@@ -48,8 +49,11 @@ defmodule BunnyTest do
   end
 
   test "process message with error" do
-    Monkey.publish "", "bunny.test.error", "nooooo"
-    assert_receive {:trying, "nooooo"}
-    refute_receive {:nope, _}
+    assert capture_log(fn ->
+      Monkey.publish "", "bunny.test.error", "nooooo"
+      assert_receive {:trying, "nooooo"}
+      refute_receive {:nope, _}
+      assert_receive {:trying, "nooooo"}
+    end) =~ "error"
   end
 end
