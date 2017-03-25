@@ -36,6 +36,8 @@ defmodule Bunny.Worker do
   @suffix_retry ".retry"
   @suffix_dead  ".dead"
 
+  @reconnect_time 500
+
 
   def init({module, opts}) do
     Logger.info "#{module} Starting worker"
@@ -46,44 +48,42 @@ defmodule Bunny.Worker do
     retry         = Keyword.get(opts, :retry, @default_retry)
     job_timeout   = Keyword.get(opts, :job_timeout, @default_job_timeout)
 
-    {:ok, conn} = Bunny.Connection.get
-    {:ok, ch} = create_channel(conn, prefetch)
-
-    # monitor Channel process
-    Process.monitor(ch.pid)
-
-    # create tasks queue
-    create_queue(ch, queue)
-
-    # create retry queue
-    create_queue(ch, queue_retry, [
-      arguments: [
-        {"x-dead-letter-exchange",    :longstr, ""},
-        {"x-dead-letter-routing-key", :longstr, queue}
-      ]
-    ])
-
-    # create dead letters queue
-    create_queue(ch, queue_dead)
-
-    # subscribe to messages
-    {:ok, _tag} = AMQP.Basic.consume(ch, queue)
-
-    # trap spawned workers exits
-    Process.flag(:trap_exit, true)
-
-    {:ok, %{
+    state = %{
       module: module,
-      conn:   conn,
-      ch:     ch,
       jobs:   %{},
+      conn: nil,
+      ch: nil,
 
       queue:        queue,
       queue_retry:  queue_retry,
       queue_dead:   queue_dead,
+      prefetch:     prefetch,
       retry:        retry,
       job_timeout:  job_timeout
-    }}
+    }
+
+    # trap spawned workers exits
+    Process.flag(:trap_exit, true)
+
+    case Bunny.Connection.get do
+      {:ok, conn} ->
+        {:ok, %{state | conn: conn, ch: setup(conn, state)}}
+
+      {:error, _} ->
+        send self(), :connect
+        {:ok, state}
+    end
+  end
+
+  def handle_info(:connect, state) do
+    case Bunny.Connection.get do
+      {:ok, conn} ->
+        {:noreply, %{state | conn: conn, ch: setup(conn, state)}}
+
+      {:error, _} ->
+        Process.send_after(self(), :connect, @reconnect_time)
+        {:noreply, state}
+    end
   end
 
   def handle_info({:basic_consume_ok, _}, state) do
@@ -150,8 +150,8 @@ defmodule Bunny.Worker do
 
   def handle_info({:DOWN, _, _, pid, reason}, %{ch: %{pid: pid}} = state) do
     # exit when channel goes DOWN
-    Logger.error "#{state.module} Channel EXIT #{inspect reason}"
-    {:stop, reason, state}
+    Process.send_after(self(), :connect, @reconnect_time)
+    {:noreply, %{state | conn: nil, ch: nil}}
   end
 
   def handle_info({:EXIT, pid, :normal}, state) do
@@ -168,6 +168,32 @@ defmodule Bunny.Worker do
   end
 
   ## INTERNALS
+
+  defp setup(conn, state) do
+    {:ok, ch} = create_channel(conn, state.prefetch)
+
+    # monitor Channel process
+    Process.monitor(ch.pid)
+
+    # create tasks queue
+    create_queue(ch, state.queue)
+
+    # create retry queue
+    create_queue(ch, state.queue_retry, [
+      arguments: [
+        {"x-dead-letter-exchange",    :longstr, ""},
+        {"x-dead-letter-routing-key", :longstr, state.queue}
+      ]
+    ])
+
+    # create dead letters queue
+    create_queue(ch, state.queue_dead)
+
+    # subscribe to messages
+    {:ok, _tag} = AMQP.Basic.consume(ch, state.queue)
+
+    ch
+  end
 
   defp create_channel(conn, prefetch_count) do
     with {:ok, channel} <- AMQP.Channel.open(conn) do

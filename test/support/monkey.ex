@@ -22,6 +22,10 @@ defmodule Monkey do
     AMQP.Queue.delete(ch, "#{name}.dead")
   end
 
+  def create_queue(name) do
+    AMQP.Queue.declare(ch(), name, [durable: true])
+  end
+
   def publish(exchange, key, msg, opts \\ []) do
     AMQP.Basic.publish(ch(), exchange, key, msg, opts)
   end
