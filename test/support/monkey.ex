@@ -15,8 +15,8 @@ defmodule Monkey do
     GenServer.call(__MODULE__, {:bind, pid})
   end
 
-  def publish(exchange, key, msg) do
-    GenServer.call(__MODULE__, {:publish, exchange, key, msg})
+  def publish(exchange, key, msg, opts \\ []) do
+    GenServer.call(__MODULE__, {:publish, exchange, key, msg, opts})
   end
 
   def send(msg) do
@@ -45,8 +45,8 @@ defmodule Monkey do
     {:reply, :ok, %{state | test: pid}}
   end
 
-  def handle_call({:publish, exchange, key, msg}, _from, %{ch: ch} = state) do
-    AMQP.Basic.publish(ch, exchange, key, msg)
+  def handle_call({:publish, exchange, key, msg, opts}, _from, %{ch: ch} = state) do
+    AMQP.Basic.publish(ch, exchange, key, msg, opts)
     {:reply, :ok, state}
   end
 

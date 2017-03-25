@@ -8,6 +8,7 @@ defmodule Bunny.Worker do
   defmacro __using__(opts) do
     quote location: :keep do
       @behaviour Bunny.Worker
+      import Bunny.Helpers
 
       def start_link do
         Bunny.Worker.start_link(__MODULE__, unquote(opts))
@@ -20,6 +21,7 @@ defmodule Bunny.Worker do
 
   use GenServer
   require Logger
+  alias Bunny.Helpers
 
   def start_link(module, opts) do
     GenServer.start_link(__MODULE__, {module, opts}, name: module)
@@ -28,9 +30,8 @@ defmodule Bunny.Worker do
   ## CALLBACKS
 
   @default_prefetch_count 1
-  @default_retry_delay    10_000 # 10s
-  @default_retry_limit    5
   @default_job_timeout    60 * 60 * 1000 # 1h
+  @default_retry          :default
 
   @suffix_retry ".retry"
   @suffix_dead  ".dead"
@@ -41,8 +42,7 @@ defmodule Bunny.Worker do
     queue_retry     = opts[:queue_retry] || queue <> @suffix_retry
     queue_dead      = opts[:queue_dead]  || queue <> @suffix_dead
     prefetch_count  = opts[:prefetch_count] || @default_prefetch_count
-    retry_delay     = opts[:retry_delay] || @default_retry_delay
-    retry_limit     = opts[:retry_limit] || @default_retry_limit
+    retry           = opts[:retry] || @default_retry
     job_timeout     = opts[:job_timeout] || @default_job_timeout
 
     {:ok, conn} = Bunny.Connection.get
@@ -74,8 +74,7 @@ defmodule Bunny.Worker do
       queue:        queue,
       queue_retry:  queue_retry,
       queue_dead:   queue_dead,
-      retry_delay:  retry_delay,
-      retry_limit:  retry_limit,
+      retry:        retry,
       job_timeout:  job_timeout
     }}
   end
@@ -116,14 +115,22 @@ defmodule Bunny.Worker do
       AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
     else
       # publish to retry queue
-      opts = [
-        expiration: "#{state.retry_delay}",
-        persistent: true,
-        headers: [
-          x_bunny_retries: 1
-        ]
-      ]
-      AMQP.Basic.publish(state.ch, "", state.queue_retry, payload, opts)
+      retries = Helpers.retries(job.meta)
+
+      case retry_delay(state.retry, retries) do
+        :dead ->
+          AMQP.Basic.publish(state.ch, "", state.queue_dead, payload, [
+            persistent: true
+          ])
+        exp ->
+          AMQP.Basic.publish(state.ch, "", state.queue_retry, payload, [
+            expiration: "#{exp}",
+            persistent: true,
+            headers: [
+              "x-bunny-retries": retries + 1
+            ]
+          ])
+      end
 
       # ack
       AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
@@ -160,5 +167,21 @@ defmodule Bunny.Worker do
     _, reason ->
       Logger.error "Job [#{module}] catch: #{inspect(reason)}"
       {:error, reason}
+  end
+
+  @doc """
+  Calculate consencutive retries delay in ms.
+  If the funciton return `:dead`
+  """
+  defp retry_delay(false, _), do: :dead
+  defp retry_delay(fun, count) when is_function(fun), do: fun.(count)
+  defp retry_delay(:default, count) do
+    if count < 15 do
+      # borrowed from sidekiq
+      # https://github.com/mperham/sidekiq/commit/b08696bd504c5f8e5ee16ff5b7ba39b9ec66ca1c
+      :math.pow(count, 4) + 15 + (:rand.uniform(30) * (count + 1)) * 1_000
+    else
+      :dead
+    end
   end
 end

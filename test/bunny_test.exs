@@ -13,12 +13,24 @@ defmodule BunnyTest do
 
   defmodule ErrorWorker do
     use Bunny.Worker, queue: "bunny.test.error",
-                      retry_delay: 0
+                      retry: fn count ->
+                        if count < 5, do: count * 100, else: :dead
+                      end
 
-    def process(payload, _meta) do
-      Monkey.send {:trying, payload}
+    def process(payload, meta) do
+      Monkey.send {:trying, payload, retries(meta)}
       _ = 1/0
       Monkey.send {:nope, payload}
+    end
+  end
+
+  defmodule OnlyOnceWorker do
+    use Bunny.Worker, queue: "bunny.test.once",
+                      retry: false
+
+    def process(_payload, _meta) do
+      Monkey.send :once
+      _ = 1/0
     end
   end
 
@@ -29,7 +41,7 @@ defmodule BunnyTest do
     Monkey.bind()
 
     # start Bunny
-    Bunny.start_link(workers: [OkWorker, ErrorWorker])
+    Bunny.start_link(workers: [OkWorker, ErrorWorker, OnlyOnceWorker])
 
     :ok
   end
@@ -50,10 +62,22 @@ defmodule BunnyTest do
 
   test "process message with error" do
     assert capture_log(fn ->
-      Monkey.publish "", "bunny.test.error", "nooooo"
-      assert_receive {:trying, "nooooo"}
+      Monkey.publish "", "bunny.test.error", "oups"
+      assert_receive {:trying, "oups", 0}
+      assert_receive {:trying, "oups", 1}
+      assert_receive {:trying, "oups", 2}, 200
+      assert_receive {:trying, "oups", 3}, 300
+      assert_receive {:trying, "oups", 4}, 400
+      assert_receive {:trying, "oups", 5}, 500
       refute_receive {:nope, _}
-      assert_receive {:trying, "nooooo"}
+    end) =~ "error"
+  end
+
+  test "do not retry if retry: false" do
+    assert capture_log(fn ->
+      Monkey.publish "", "bunny.test.once", "one"
+      assert_receive :once
+      refute_receive :once, 300
     end) =~ "error"
   end
 end
