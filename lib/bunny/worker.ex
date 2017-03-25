@@ -29,24 +29,24 @@ defmodule Bunny.Worker do
 
   ## CALLBACKS
 
-  @default_prefetch_count 1
-  @default_job_timeout    60 * 60 * 1000 # 1h
-  @default_retry          :default
+  @default_prefetch     1
+  @default_job_timeout  60 * 60 * 1000 # 1h
+  @default_retry        :default
 
   @suffix_retry ".retry"
   @suffix_dead  ".dead"
 
 
   def init({module, opts}) do
-    queue           = Keyword.fetch!(opts, :queue)
-    queue_retry     = opts[:queue_retry] || queue <> @suffix_retry
-    queue_dead      = opts[:queue_dead]  || queue <> @suffix_dead
-    prefetch_count  = opts[:prefetch_count] || @default_prefetch_count
-    retry           = opts[:retry] || @default_retry
-    job_timeout     = opts[:job_timeout] || @default_job_timeout
+    queue         = Keyword.fetch!(opts, :queue)
+    queue_retry   = Keyword.get(opts, :queue_retry, queue <> @suffix_retry)
+    queue_dead    = Keyword.get(opts, :queue_dead,  queue <> @suffix_dead)
+    prefetch      = Keyword.get(opts, :prefetch, @default_prefetch)
+    retry         = Keyword.get(opts, :retry, @default_retry)
+    job_timeout   = Keyword.get(opts, :job_timeout, @default_job_timeout)
 
     {:ok, conn} = Bunny.Connection.get
-    {:ok, ch} = create_channel(conn, prefetch_count)
+    {:ok, ch} = create_channel(conn, prefetch)
 
     # create tasks queue
     create_queue(ch, queue)
@@ -169,14 +169,10 @@ defmodule Bunny.Worker do
       {:error, reason}
   end
 
-  @doc """
-  Calculate consencutive retries delay in ms.
-  If the funciton return `:dead`
-  """
   defp retry_delay(false, _), do: :dead
   defp retry_delay(fun, count) when is_function(fun), do: fun.(count)
   defp retry_delay(:default, count) do
-    if count < 15 do
+    if count < 25 do
       # borrowed from sidekiq
       # https://github.com/mperham/sidekiq/commit/b08696bd504c5f8e5ee16ff5b7ba39b9ec66ca1c
       :math.pow(count, 4) + 15 + (:rand.uniform(30) * (count + 1)) * 1_000

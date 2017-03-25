@@ -13,14 +13,16 @@ defmodule BunnyTest do
 
   defmodule ErrorWorker do
     use Bunny.Worker, queue: "bunny.test.error",
-                      retry: fn count ->
-                        if count < 5, do: count * 100, else: :dead
-                      end
+                      retry: &retry_strategy/1
 
     def process(payload, meta) do
       Monkey.send {:trying, payload, retries(meta)}
       _ = 1/0
       Monkey.send {:nope, payload}
+    end
+
+    defp retry_strategy(count) do
+      if count < 5, do: count * 100, else: :dead
     end
   end
 
@@ -38,6 +40,7 @@ defmodule BunnyTest do
     # start with clean state
     Monkey.delete_queues("bunny.test.ok")
     Monkey.delete_queues("bunny.test.error")
+    Monkey.delete_queues("bunny.test.once")
     Monkey.bind()
 
     # start Bunny
@@ -71,6 +74,10 @@ defmodule BunnyTest do
       assert_receive {:trying, "oups", 5}, 500
       refute_receive {:nope, _}
     end) =~ "error"
+
+    assert Monkey.count("bunny.test.error") == 0
+    assert Monkey.count("bunny.test.error.retry") == 0
+    assert Monkey.count("bunny.test.error.dead") == 1
   end
 
   test "do not retry if retry: false" do
@@ -78,6 +85,10 @@ defmodule BunnyTest do
       Monkey.publish "", "bunny.test.once", "one"
       assert_receive :once
       refute_receive :once, 300
+
+      assert Monkey.count("bunny.test.once") == 0
+      assert Monkey.count("bunny.test.once.retry") == 0
+      assert Monkey.count("bunny.test.once.dead") == 1
     end) =~ "error"
   end
 end
