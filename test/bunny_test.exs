@@ -53,6 +53,21 @@ defmodule BunnyTest do
     end
   end
 
+  defmodule ConnSmashingWorker do
+    use Bunny.Worker, queue: "bunny.test.conn",
+                      retry: false
+
+    def process(_payload, _meta) do
+      IO.puts "WAITING"
+      Monkey.send {:waiting, self()}
+      receive do
+        :go ->
+          IO.puts "GO"
+          :ok
+      end
+    end
+  end
+
 
 
   setup do
@@ -61,6 +76,7 @@ defmodule BunnyTest do
     Monkey.delete_queues("bunny.test.error")
     Monkey.delete_queues("bunny.test.retry")
     Monkey.delete_queues("bunny.test.once")
+    Monkey.delete_queues("bunny.test.conn")
     Monkey.bind()
 
     # start Bunny
@@ -68,7 +84,8 @@ defmodule BunnyTest do
       OkWorker,
       ErrorWorker,
       RetryWorker,
-      OnlyOnceWorker
+      OnlyOnceWorker,
+      ConnSmashingWorker
     ])
 
     :ok
@@ -174,5 +191,31 @@ defmodule BunnyTest do
       :timer.sleep(50)
       assert Monkey.counts("bunny.test.error") == {0,0,1}
     end) =~ "error"
+  end
+
+
+  @tag :focus
+  test "handle connection broken while processing" do
+    # publish message
+    Monkey.publish "", "bunny.test.conn", "hi"
+    # wait for worker to pick it up
+    assert_receive {:waiting, pid}
+
+    # crash the connection
+    {:ok, conn} = Bunny.Connection.get
+    connpid = conn.pid
+    Process.monitor(connpid)
+    Process.exit(connpid, :kill)
+    assert_receive {:DOWN, _, _, ^connpid, _}
+
+    # make worker continue
+    send pid, :go
+
+    # wait for worker to pick it up again
+    assert_receive {:waiting, pid}
+    send pid, :go
+
+    :timer.sleep(50)
+    assert Monkey.counts("bunny.test.conn") == {0,0,0}
   end
 end

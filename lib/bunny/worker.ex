@@ -38,6 +38,7 @@ defmodule Bunny.Worker do
 
 
   def init({module, opts}) do
+    Logger.info "#{module} Starting worker"
     queue         = Keyword.fetch!(opts, :queue)
     queue_retry   = Keyword.get(opts, :queue_retry, queue <> @suffix_retry)
     queue_dead    = Keyword.get(opts, :queue_dead,  queue <> @suffix_dead)
@@ -47,6 +48,9 @@ defmodule Bunny.Worker do
 
     {:ok, conn} = Bunny.Connection.get
     {:ok, ch} = create_channel(conn, prefetch)
+
+    # monitor Channel process
+    Process.monitor(ch.pid)
 
     # create tasks queue
     create_queue(ch, queue)
@@ -142,6 +146,12 @@ defmodule Bunny.Worker do
     end
 
     {:noreply, %{state | jobs: jobs}}
+  end
+
+  def handle_info({:DOWN, _, _, pid, reason}, %{ch: %{pid: pid}} = state) do
+    # exit when channel goes DOWN
+    Logger.error "#{state.module} Channel EXIT #{inspect reason}"
+    {:stop, reason, state}
   end
 
   def handle_info({:EXIT, pid, :normal}, state) do

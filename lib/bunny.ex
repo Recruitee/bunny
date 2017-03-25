@@ -1,16 +1,25 @@
 defmodule Bunny do
+  import Supervisor.Spec, warn: false
+
+  defmodule WorkersSupervisor do
+    def start_link(opts) do
+      modules = opts[:workers] || []
+      children = Enum.map(modules, &worker(&1, []))
+
+      opts = [strategy: :one_for_one, name: __MODULE__]
+      Supervisor.start_link(children, opts)
+    end
+  end
+
+
   def start_link(opts) do
-    import Supervisor.Spec, warn: false
-
-    worker_modules = opts[:workers] || []
-
-    infra = [
-      worker(Bunny.Connection, [])
+    children = [
+      worker(Bunny.Connection, []),
+      supervisor(Bunny.WorkersSupervisor, [opts])
     ]
-    workers = Enum.map(worker_modules, &worker(&1, []))
 
-    opts = [strategy: :one_for_one, name: Bunny.Supervisor]
-    Supervisor.start_link(infra ++ workers, opts)
+    opts = [strategy: :rest_for_one, name: Bunny.Supervisor]
+    Supervisor.start_link(children, opts)
   end
 
   def stop do
