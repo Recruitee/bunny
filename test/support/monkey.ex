@@ -30,6 +30,15 @@ defmodule Monkey do
     AMQP.Queue.message_count(ch(), queue)
   end
 
+  def counts(queue) do
+    ch = ch()
+    {
+      AMQP.Queue.message_count(ch, queue),
+      AMQP.Queue.message_count(ch, queue <> ".retry"),
+      AMQP.Queue.message_count(ch, queue <> ".dead")
+    }
+  end
+
   def ch do
     GenServer.call(__MODULE__, :ch)
   end

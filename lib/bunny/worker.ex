@@ -65,6 +65,9 @@ defmodule Bunny.Worker do
     # subscribe to messages
     {:ok, _tag} = AMQP.Basic.consume(ch, queue)
 
+    # trap spawned workers exits
+    Process.flag(:trap_exit, true)
+
     {:ok, %{
       module: module,
       conn:   conn,
@@ -96,47 +99,62 @@ defmodule Bunny.Worker do
 
     pid = spawn_link fn ->
       res = process(state.module, payload, meta)
-      send worker, {:finished, self(), res, payload}
+      send worker, {:finished, self(), res}
     end
 
     # kill after timeout reached
     :timer.kill_after(state.job_timeout, pid)
 
-    job = %{meta: meta}
+    job = %{payload: payload, meta: meta}
 
     {:noreply, %{state | jobs: Map.put(state.jobs, pid, job)}}
   end
 
-  def handle_info({:finished, pid, result, payload}, state) do
+  def handle_info({:finished, pid, result}, state) do
     {job, jobs} = Map.pop(state.jobs, pid)
 
-    if ok?(result) do
-      # just ack
-      AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
-    else
-      # publish to retry queue
-      retries = Helpers.retries(job.meta)
+    case result do
+      {:error, {:exception, error, trace}} ->
+        Logger.error "Job [#{state.module}] exception: #{inspect(error)}\n#{Exception.format_stacktrace(trace)}"
+        retry(state, job)
 
-      case retry_delay(state.retry, retries) do
-        :dead ->
-          AMQP.Basic.publish(state.ch, "", state.queue_dead, payload, [
-            persistent: true
-          ])
-        exp ->
-          AMQP.Basic.publish(state.ch, "", state.queue_retry, payload, [
-            expiration: "#{exp}",
-            persistent: true,
-            headers: [
-              "x-bunny-retries": retries + 1
-            ]
-          ])
-      end
+      {:error, {:throw, msg, reason}} ->
+        Logger.error "Job [#{state.module}] unexepcted throw: #{inspect(msg)} - #{inspect(reason)}"
+        retry(state, job)
 
-      # ack
-      AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
+      {:error, {:exit, reason}} ->
+        Logger.error "Job [#{state.module}] process EXIT: #{inspect(reason)}"
+        retry(state, job)
+
+      {:error, reason} ->
+        Logger.error "Job [#{state.module}] returned {:error, #{inspect(reason)}}"
+        retry(state, job)
+
+      :error ->
+        Logger.error "Job [#{state.module}] retruned :error"
+        retry(state, job)
+
+      {:ok, _} ->
+        ack(state, job)
+
+      :ok ->
+        ack(state, job)
     end
 
     {:noreply, %{state | jobs: jobs}}
+  end
+
+  def handle_info({:EXIT, pid, :normal}, state) do
+    # ignore normal exits
+    {:noreply, state}
+  end
+
+  def handle_info({:EXIT, pid, reason}, state) do
+    if Map.has_key?(state.jobs, pid) do
+      send self(), {:finished, pid, {:error, {:exit, reason}}}
+    end
+
+    {:noreply, state}
   end
 
   ## INTERNALS
@@ -152,21 +170,15 @@ defmodule Bunny.Worker do
     {:ok, _} = AMQP.Queue.declare(ch, name, opts ++ [durable: true])
   end
 
-  defp ok?(:ok), do: true
-  defp ok?({:ok, _}), do: true
-  defp ok?(_), do: false
-
-  def process(module, payload, meta) do
+  defp process(module, payload, meta) do
     apply(module, :process, [payload, meta])
   rescue
     error ->
       trace = System.stacktrace
-      Logger.error "Job [#{module}] exception: #{inspect(error)}\n#{Exception.format_stacktrace(trace)}"
-      {:error, error}
+      {:error, {:exception, error, trace}}
   catch
-    _, reason ->
-      Logger.error "Job [#{module}] catch: #{inspect(reason)}"
-      {:error, reason}
+    msg, reason ->
+      {:error, {:throw, msg, reason}}
   end
 
   defp retry_delay(false, _), do: :dead
@@ -179,5 +191,30 @@ defmodule Bunny.Worker do
     else
       :dead
     end
+  end
+
+  defp ack(state, job) do
+    AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
+  end
+
+  defp retry(state, job) do
+    retries = Helpers.retries(job.meta)
+
+    case retry_delay(state.retry, retries) do
+      :dead ->
+        AMQP.Basic.publish(state.ch, "", state.queue_dead, job.payload, [
+          persistent: true
+        ])
+      exp ->
+        AMQP.Basic.publish(state.ch, "", state.queue_retry, job.payload, [
+          expiration: "#{exp}",
+          persistent: true,
+          headers: [
+            "x-bunny-retries": retries + 1
+          ]
+        ])
+    end
+
+    ack(state, job)
   end
 end
