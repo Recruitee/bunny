@@ -1,6 +1,5 @@
 defmodule BunnyInvalidConnectionTest do
   use ExUnit.Case, async: false
-  import ExUnit.CaptureLog
 
   defmodule OkWorker do
     use Bunny.Worker, queue: "bunny.test.ok"

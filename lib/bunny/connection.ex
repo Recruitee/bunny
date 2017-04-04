@@ -33,7 +33,7 @@ defmodule Bunny.Connection do
     case connect(retry) do
       {:ok, conn} ->
         {:noreply, conn}
-      {:error, reason} ->
+      {:error, _reason} ->
         {:noreply, nil}
     end
   end

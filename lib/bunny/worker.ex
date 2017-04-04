@@ -148,13 +148,13 @@ defmodule Bunny.Worker do
     {:noreply, %{state | jobs: jobs}}
   end
 
-  def handle_info({:DOWN, _, _, pid, reason}, %{ch: %{pid: pid}} = state) do
+  def handle_info({:DOWN, _, _, pid, _reason}, %{ch: %{pid: pid}} = state) do
     # exit when channel goes DOWN
     Process.send_after(self(), :connect, @reconnect_time)
     {:noreply, %{state | conn: nil, ch: nil}}
   end
 
-  def handle_info({:EXIT, pid, :normal}, state) do
+  def handle_info({:EXIT, _pid, :normal}, state) do
     # ignore normal exits
     {:noreply, state}
   end
