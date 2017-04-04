@@ -48,7 +48,7 @@ children = [
   supervisor(MyApp.Endpoint, []),
 
   # add Bunny listing workers
-  supervisor(Bunny, workers: [EasyWorker, HardWorker])
+  supervisor(Bunny, [[workers: [EasyWorker, HardWorker]]])
 ]
 # ...
 ```
