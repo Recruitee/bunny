@@ -1,6 +1,6 @@
 # Bunny
 
-**TODO: Add description**
+RabbitMQ client. Do **NOT** use this. Seriously, **don't**. You have been warned.
 
 ## Installation
 
@@ -10,7 +10,7 @@ If [available in Hex](https://hex.pm/docs/publish), the package can be installed
 
     ```elixir
     def deps do
-      [{:bunny, "~> 0.1.0"}]
+      [{:bunny, github: "recruitee/bunny"}]
     end
     ```
 
