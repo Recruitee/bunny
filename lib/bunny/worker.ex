@@ -148,7 +148,8 @@ defmodule Bunny.Worker do
     {:noreply, %{state | jobs: jobs}}
   end
 
-  def handle_info({:DOWN, _, _, pid, _reason}, %{ch: %{pid: pid}} = state) do
+  def handle_info({:DOWN, _, _, pid, reason}, %{ch: %{pid: pid}} = state) do
+    Logger.warn inspect({:DOWN, :reconnect, reason})
     # exit when channel goes DOWN
     Process.send_after(self(), :connect, @reconnect_time)
     {:noreply, %{state | conn: nil, ch: nil}}
@@ -223,14 +224,14 @@ defmodule Bunny.Worker do
     if count < 25 do
       # borrowed from sidekiq
       # https://github.com/mperham/sidekiq/commit/b08696bd504c5f8e5ee16ff5b7ba39b9ec66ca1c
-      :math.pow(count, 4) + 15 + (:rand.uniform(30) * (count + 1)) * 1_000
+      round(:math.pow(count, 4)) + (:rand.uniform(10) * (count + 1)) * 1_000
     else
       :dead
     end
   end
 
   defp ack(state, job) do
-    AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
+    :ok = AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
   end
 
   defp retry(state, job) do
@@ -242,7 +243,8 @@ defmodule Bunny.Worker do
           persistent: true
         ])
       exp ->
-        AMQP.Basic.publish(state.ch, "", state.queue_retry, job.payload, [
+        :ok = AMQP.Basic.publish(state.ch, "", state.queue_retry, job.payload, [
+          content_type: job.meta.content_type,
           expiration: "#{exp}",
           persistent: true,
           headers: [
