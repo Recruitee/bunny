@@ -7,12 +7,8 @@ defmodule Bunny.Mixfile do
      elixir: "~> 1.3",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
-     elixirc_paths: elixirc_paths(Mix.env),
      deps: deps()]
   end
-
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_),     do: ["lib"]
 
   def application do
     [applications: [:logger, :amqp]]
@@ -20,7 +16,11 @@ defmodule Bunny.Mixfile do
 
   defp deps do
     [
-      {:amqp, "~> 0.2.0-pre.1"}
+      {:amqp, "~> 0.2.0-pre.1"},
+
+      # dev & test
+      {:mix_test_watch, "~> 0.2", only: :dev},
+      {:twin, path: "~/code/twin", only: :test},
     ]
   end
 end

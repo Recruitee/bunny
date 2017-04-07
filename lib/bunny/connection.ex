@@ -2,8 +2,10 @@ defmodule Bunny.Connection do
   use GenServer
   require Logger
 
-  @reconnect_delay 500
-  @max_retries 10
+  @reconnect_delay 1000
+
+  @amqp_connection Twin.get(AMQP.Connection)
+  @worker Twin.get(Bunny.Worker)
 
   ## CLIENT API
 
@@ -11,50 +13,42 @@ defmodule Bunny.Connection do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
-  def get do
-    GenServer.call(__MODULE__, :get)
-  end
-
   ## CALLBACKS
 
-  def init(_) do
-    case connect() do
-      {:ok, conn} ->
-        {:ok, conn}
-      {:error, _} ->
-        {:ok, nil}
-    end
+  def init(_modules) do
+    send self(), :connect
+    {:ok, nil}
   end
 
-  def handle_call(:get, _, nil),  do: {:reply, {:error, :disconnected}, nil}
-  def handle_call(:get, _, conn), do: {:reply, {:ok, conn}, conn}
-
-  def handle_info({:connect, retry}, _) do
-    case connect(retry) do
-      {:ok, conn} ->
-        {:noreply, conn}
-      {:error, _reason} ->
-        {:noreply, nil}
-    end
+  def handle_info(:connect, state) do
+    handle_connect(@amqp_connection.open(Bunny.server_url), state)
   end
 
-  def handle_info({:DOWN, _, :process, _pid, _reason}, _) do
-    Logger.warn "#{inspect self()} Disconnected, reconnecting"
-    send self(), {:connect, 0}
+  def handle_connect({:ok, conn}, _state) do
+    Logger.info "Connected to RabbitMQ at #{Bunny.server_url}"
+
+    # link with AMQP connection process
+    Process.link(conn.pid)
+
+    # TODO: Start multiple workers
+    {:ok, worker} = @worker.start_link(conn, mod: Bunny.Debug, queue: "bunny.debug")
+
+    {:noreply, %{conn: conn, workers: [worker]}}
+  end
+
+  def handle_connect({:error, reason}, %{workers: workers}) do
+    Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
+    # stop all workers
+    for pid <- workers, do: @worker.stop(pid)
+    # try to reconnect
+    Process.send_after(self(), :connect, @reconnect_delay)
     {:noreply, nil}
   end
 
-  defp connect(retry \\ 0) do
-    case AMQP.Connection.open(Bunny.server_url) do
-      {:ok, conn} ->
-        Process.monitor(conn.pid)
-        Logger.info "Connected to RabbitMQ at #{Bunny.server_url}"
-        {:ok, conn}
-      {:error, reason} ->
-        delay = retry * @reconnect_delay
-        Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}. Will try again in #{delay}"
-        Process.send_after(self(), {:connect, retry + 1}, delay)
-        {:error, reason}
-    end
+  def handle_connect({:error, reason}, _state) do
+    Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
+    # try to reconnect
+    Process.send_after(self(), :connect, @reconnect_delay)
+    {:noreply, nil}
   end
 end

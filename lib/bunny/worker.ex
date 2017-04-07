@@ -1,258 +1,172 @@
 defmodule Bunny.Worker do
   ## BEHAVIOUR SPEC
-  @callback process(payload :: binary, meta :: map) :: no_return
+  @callback handle_message(payload :: binary, meta :: map) :: :ok | {:ok, any} | {:reply, any, keyword}
 
 
-  ## UNNECESSARY MACRO SUGAR
-
-  defmacro __using__(opts) do
-    quote location: :keep do
-      @behaviour Bunny.Worker
-      import Bunny.Helpers
-
-      def start_link do
-        Bunny.Worker.start_link(__MODULE__, unquote(opts))
-      end
-    end
-  end
-
-
+  # ## UNNECESSARY MACRO SUGAR
+  #
+  # defmacro __using__(opts) do
+  #   quote location: :keep do
+  #     @behaviour Bunny.Worker
+  #     import Bunny.Helpers
+  #
+  #     def start_link do
+  #       Bunny.Worker.start_link(__MODULE__, unquote(opts))
+  #     end
+  #   end
+  # end
+  #
+  #
   ## CLIENT API
 
   use GenServer
   require Logger
-  alias Bunny.Helpers
+  # alias Bunny.Helpers
 
-  def start_link(module, opts) do
-    GenServer.start_link(__MODULE__, {module, opts}, name: module)
+  def start_link(%AMQP.Connection{} = conn, opts) do
+    GenServer.start_link(__MODULE__, {conn, opts}, [])
+  end
+
+  def stop(pid) do
+    GenServer.call(pid, :stop)
   end
 
   ## CALLBACKS
 
-  @default_prefetch     1
-  @default_job_timeout  60 * 60 * 1000 # 1h
-  @default_retry        :default
+  @default_prefetch   10
+  @default_timeout    60 * 60 * 1000 # 1h
 
   @suffix_retry ".retry"
-  @suffix_dead  ".dead"
 
-  @reconnect_time 500
+  @amqp_basic   Twin.get(AMQP.Basic)
+  @amqp_channel Twin.get(AMQP.Channel)
+  @amqp_queue   Twin.get(AMQP.Queue)
 
+  def init({conn, opts}) do
+    Logger.info "Starting worker: #{inspect(opts)}"
 
-  def init({module, opts}) do
-    Logger.info "#{module} Starting worker"
+    # configuration handling
+    mod           = Keyword.fetch!(opts, :mod)
+
     queue         = Keyword.fetch!(opts, :queue)
     queue_retry   = Keyword.get(opts, :queue_retry, queue <> @suffix_retry)
-    queue_dead    = Keyword.get(opts, :queue_dead,  queue <> @suffix_dead)
     prefetch      = Keyword.get(opts, :prefetch, @default_prefetch)
-    retry         = Keyword.get(opts, :retry, @default_retry)
-    job_timeout   = Keyword.get(opts, :job_timeout, @default_job_timeout)
+    timeout       = Keyword.get(opts, :job_timeout, @default_timeout)
 
-    state = %{
-      module: module,
-      jobs:   %{},
-      conn: nil,
-      ch: nil,
+
+    # channel setup
+    {:ok, ch} = @amqp_channel.open(conn)
+    Process.link(ch.pid)
+    @amqp_basic.qos(ch, prefetch_count: prefetch)
+
+    # create main task queue
+    {:ok, _} = @amqp_queue.declare(ch, queue, durable: true)
+
+    # create retry queue
+    {:ok, _} = @amqp_queue.declare(ch, queue_retry, durable: true, arguments: [
+      {"x-dead-letter-exchange",    :longstr, ""},
+      {"x-dead-letter-routing-key", :longstr, queue}
+    ])
+
+    # subscribe to messages
+    {:ok, _tag} = @amqp_basic.consume(ch, queue)
+
+    {:ok, %{
+      ch: ch,
+      mod: mod,
 
       queue:        queue,
       queue_retry:  queue_retry,
-      queue_dead:   queue_dead,
-      prefetch:     prefetch,
-      retry:        retry,
-      job_timeout:  job_timeout
-    }
-
-    # trap spawned workers exits
-    Process.flag(:trap_exit, true)
-
-    case Bunny.Connection.get do
-      {:ok, conn} ->
-        {:ok, %{state | conn: conn, ch: setup(conn, state)}}
-
-      {:error, _} ->
-        send self(), :connect
-        {:ok, state}
-    end
+      timeout:      timeout
+    }}
   end
 
-  def handle_info(:connect, state) do
-    case Bunny.Connection.get do
-      {:ok, conn} ->
-        {:noreply, %{state | conn: conn, ch: setup(conn, state)}}
-
-      {:error, _} ->
-        Process.send_after(self(), :connect, @reconnect_time)
-        {:noreply, state}
-    end
+  def handle_call(:stop, _from, state) do
+    {:stop, :normal, state}
   end
+
+  # AMQP callbacks
 
   def handle_info({:basic_consume_ok, _}, state) do
     {:noreply, state}
   end
 
-  def handle_info({:basic_cancel, _}, chan) do
-    {:stop, :normal, chan}
+  def handle_info({:basic_cancel, _}, state) do
+    # TODO: Cancel jobs
+    {:stop, :normal, state}
   end
 
-  def handle_info({:basic_cancel_ok, _}, chan) do
-    {:noreply, chan}
+  def handle_info({:basic_cancel_ok, _}, state) do
+    {:noreply, state}
   end
 
   def handle_info({:basic_deliver, payload, meta}, state) do
-    worker = self()
+    # spawn process for consuming this message
+    spawn_link fn -> consume(payload, meta, state) end
 
+    {:noreply, state}
+  end
+
+
+  def consume(payload, meta, state) do
+    # Quite o lot is happening here
+    # First, trap EXIT signals from linked processes
+    Process.flag(:trap_exit, true)
+
+    # Then, spawn a process for calling calback module
     pid = spawn_link fn ->
-      res = process(state.module, payload, meta)
-      send worker, {:finished, self(), res}
+      apply(state.mod, :handle_message, [payload, meta, state])
     end
 
-    # kill after timeout reached
-    :timer.kill_after(state.job_timeout, pid)
+    # Set a timeout after which that process will be killed
+    :timer.kill_after(60_000, pid)
 
-    job = %{payload: payload, meta: meta}
+    # Now wait for EXIT messages
+    receive do
+      # In case of :normal exit simply ack the message
+      {:EXIT, ^pid, :normal} ->
+        @amqp_basic.ack(state.ch, meta.delivery_tag)
 
-    {:noreply, %{state | jobs: Map.put(state.jobs, pid, job)}}
-  end
+      # In case of error
+      {:EXIT, ^pid, _reason} ->
+        # Push the message into retry queue
+        retries = meta_retries(meta)
+        exp = expiration(retries)
+        options =
+          meta
+          |> Map.merge(%{
+            expiration: "#{exp}",
+            persistent: true,
+            headers: ["x-bunny-retries": retries + 1],
+            content_type: meta.content_type
+          })
+          |> Map.to_list
+        @amqp_basic.publish(state.ch, "", state.queue_retry, payload, options)
 
-  def handle_info({:finished, pid, result}, state) do
-    {job, jobs} = Map.pop(state.jobs, pid)
+        # TODO: Store reason in headers
+        # And then ack the original message
+        @amqp_basic.ack(state.ch, meta.delivery_tag)
 
-    case result do
-      {:error, {:exception, error, trace}} ->
-        Logger.error "Job [#{state.module}] exception: #{inspect(error)}\n#{Exception.format_stacktrace(trace)}"
-        retry(state, job)
-
-      {:error, {:throw, msg, reason}} ->
-        Logger.error "Job [#{state.module}] unexepcted throw: #{inspect(msg)} - #{inspect(reason)}"
-        retry(state, job)
-
-      {:error, {:exit, reason}} ->
-        Logger.error "Job [#{state.module}] process EXIT: #{inspect(reason)}"
-        retry(state, job)
-
-      {:error, reason} ->
-        Logger.error "Job [#{state.module}] returned {:error, #{inspect(reason)}}"
-        retry(state, job)
-
-      :error ->
-        Logger.error "Job [#{state.module}] retruned :error"
-        retry(state, job)
-
-      {:ok, _} ->
-        ack(state, job)
-
-      :ok ->
-        ack(state, job)
-    end
-
-    {:noreply, %{state | jobs: jobs}}
-  end
-
-  def handle_info({:DOWN, _, _, pid, reason}, %{ch: %{pid: pid}} = state) do
-    Logger.warn inspect({:DOWN, :reconnect, reason})
-    # exit when channel goes DOWN
-    Process.send_after(self(), :connect, @reconnect_time)
-    {:noreply, %{state | conn: nil, ch: nil}}
-  end
-
-  def handle_info({:EXIT, _pid, :normal}, state) do
-    # ignore normal exits
-    {:noreply, state}
-  end
-
-  def handle_info({:EXIT, pid, reason}, state) do
-    if Map.has_key?(state.jobs, pid) do
-      send self(), {:finished, pid, {:error, {:exit, reason}}}
-    end
-
-    {:noreply, state}
-  end
-
-  ## INTERNALS
-
-  defp setup(conn, state) do
-    {:ok, ch} = create_channel(conn, state.prefetch)
-
-    # monitor Channel process
-    Process.monitor(ch.pid)
-
-    # create tasks queue
-    create_queue(ch, state.queue)
-
-    # create retry queue
-    create_queue(ch, state.queue_retry, [
-      arguments: [
-        {"x-dead-letter-exchange",    :longstr, ""},
-        {"x-dead-letter-routing-key", :longstr, state.queue}
-      ]
-    ])
-
-    # create dead letters queue
-    create_queue(ch, state.queue_dead)
-
-    # subscribe to messages
-    {:ok, _tag} = AMQP.Basic.consume(ch, state.queue)
-
-    ch
-  end
-
-  defp create_channel(conn, prefetch_count) do
-    with {:ok, channel} <- AMQP.Channel.open(conn) do
-      AMQP.Basic.qos(channel, prefetch_count: prefetch_count)
-      {:ok, channel}
+      # In case of other EXIT message just die
+      # The job process will die too since it's linked
+      {:EXIT, _pid, reason} ->
+        Process.exit(self(), reason)
     end
   end
 
-  defp create_queue(ch, name, opts \\ []) do
-    {:ok, _} = AMQP.Queue.declare(ch, name, opts ++ [durable: true])
+  defp expiration(count) do
+    round(:math.pow(count, 4)) + (:rand.uniform(10) * (count + 1)) * 1_000
   end
 
-  defp process(module, payload, meta) do
-    apply(module, :process, [payload, meta])
-  rescue
-    error ->
-      trace = System.stacktrace
-      {:error, {:exception, error, trace}}
-  catch
-    msg, reason ->
-      {:error, {:throw, msg, reason}}
+  defp meta_retries(meta) do
+    meta_header(meta, "x-bunny-retries") || 0
   end
 
-  defp retry_delay(false, _), do: :dead
-  defp retry_delay(fun, count) when is_function(fun), do: fun.(count)
-  defp retry_delay(:default, count) do
-    if count < 25 do
-      # borrowed from sidekiq
-      # https://github.com/mperham/sidekiq/commit/b08696bd504c5f8e5ee16ff5b7ba39b9ec66ca1c
-      round(:math.pow(count, 4)) + (:rand.uniform(10) * (count + 1)) * 1_000
-    else
-      :dead
+  defp meta_header(%{headers: :undefined}, _), do: nil
+  defp meta_header(%{headers: headers}, key) do
+    Enum.find_value headers, fn
+      {^key, _, value}  -> value
+      _                 -> nil
     end
-  end
-
-  defp ack(state, job) do
-    :ok = AMQP.Basic.ack(state.ch, job.meta.delivery_tag)
-  end
-
-  defp retry(state, job) do
-    retries = Helpers.retries(job.meta)
-
-    case retry_delay(state.retry, retries) do
-      :dead ->
-        AMQP.Basic.publish(state.ch, "", state.queue_dead, job.payload, [
-          persistent: true
-        ])
-      exp ->
-        :ok = AMQP.Basic.publish(state.ch, "", state.queue_retry, job.payload, [
-          content_type: job.meta.content_type,
-          expiration: "#{exp}",
-          persistent: true,
-          headers: [
-            "x-bunny-retries": retries + 1
-          ]
-        ])
-    end
-
-    ack(state, job)
   end
 end
