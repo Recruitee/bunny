@@ -9,46 +9,62 @@ defmodule Bunny.Connection do
 
   ## CLIENT API
 
-  def start_link do
-    GenServer.start_link(__MODULE__, [], name: __MODULE__)
+  def start_link(specs \\ []) do
+    GenServer.start_link(__MODULE__, specs, name: __MODULE__)
   end
+
+  def stop(pid) do
+    GenServer.stop(pid)
+  end
+
 
   ## CALLBACKS
 
-  def init(_modules) do
+  def init(specs) do
     send self(), :connect
-    {:ok, nil}
+    {:ok, %{specs: specs}}
   end
 
   def handle_info(:connect, state) do
     handle_connect(@amqp_connection.open(Bunny.server_url), state)
   end
 
-  def handle_connect({:ok, conn}, _state) do
+  def handle_connect({:ok, conn}, %{specs: specs}) do
     Logger.info "Connected to RabbitMQ at #{Bunny.server_url}"
 
     # link with AMQP connection process
     Process.link(conn.pid)
 
-    # TODO: Start multiple workers
-    {:ok, worker} = @worker.start_link(conn, mod: Bunny.Debug, queue: "bunny.debug")
+    workers = for spec <- specs do
+      {:ok, worker} = @worker.start_link(conn, spec)
+      worker
+    end
 
-    {:noreply, %{conn: conn, workers: [worker]}}
+    {:noreply, %{conn: conn, workers: workers, specs: specs}}
   end
 
-  def handle_connect({:error, reason}, %{workers: workers}) do
+  def handle_connect({:error, reason}, %{workers: workers, specs: specs}) do
     Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
     # stop all workers
     for pid <- workers, do: @worker.stop(pid)
     # try to reconnect
     Process.send_after(self(), :connect, @reconnect_delay)
-    {:noreply, nil}
+    {:noreply, %{specs: specs}}
   end
 
-  def handle_connect({:error, reason}, _state) do
+  def handle_connect({:error, reason}, state) do
     Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
     # try to reconnect
     Process.send_after(self(), :connect, @reconnect_delay)
-    {:noreply, nil}
+    {:noreply, state}
+  end
+
+  def terminate(_reason, %{conn: conn, workers: workers}) do
+    # stop all workers
+    for pid <- workers, do: @worker.stop(pid)
+
+    # close AMQP connection
+    Process.unlink(conn.pid)
+    AMQP.Connection.close(conn)
   end
 end

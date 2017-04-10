@@ -1,2 +1,2 @@
 Twin.start_link()
-ExUnit.start()
+ExUnit.start(capture_log: true)

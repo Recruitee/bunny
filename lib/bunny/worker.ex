@@ -28,7 +28,7 @@ defmodule Bunny.Worker do
   end
 
   def stop(pid) do
-    GenServer.call(pid, :stop)
+    GenServer.stop(pid)
   end
 
   ## CALLBACKS
@@ -53,7 +53,6 @@ defmodule Bunny.Worker do
     prefetch      = Keyword.get(opts, :prefetch, @default_prefetch)
     timeout       = Keyword.get(opts, :job_timeout, @default_timeout)
 
-
     # channel setup
     {:ok, ch} = @amqp_channel.open(conn)
     Process.link(ch.pid)
@@ -69,20 +68,17 @@ defmodule Bunny.Worker do
     ])
 
     # subscribe to messages
-    {:ok, _tag} = @amqp_basic.consume(ch, queue)
+    {:ok, tag} = @amqp_basic.consume(ch, queue)
 
     {:ok, %{
       ch: ch,
+      tag: tag,
       mod: mod,
 
       queue:        queue,
       queue_retry:  queue_retry,
       timeout:      timeout
     }}
-  end
-
-  def handle_call(:stop, _from, state) do
-    {:stop, :normal, state}
   end
 
   # AMQP callbacks
@@ -107,6 +103,10 @@ defmodule Bunny.Worker do
     {:noreply, state}
   end
 
+  def terminate(_reason, %{ch: ch, tag: tag}) do
+    @amqp_basic.cancel(ch, tag)
+    @amqp_channel.close(ch)
+  end
 
   def consume(payload, meta, state) do
     # Quite o lot is happening here
@@ -115,7 +115,8 @@ defmodule Bunny.Worker do
 
     # Then, spawn a process for calling calback module
     pid = spawn_link fn ->
-      apply(state.mod, :handle_message, [payload, meta, state])
+      from = %{ch: state.ch, reply_to: meta.reply_to}
+      apply(state.mod, :handle_message, [payload, meta, from])
     end
 
     # Set a timeout after which that process will be killed
@@ -168,5 +169,13 @@ defmodule Bunny.Worker do
       {^key, _, value}  -> value
       _                 -> nil
     end
+  end
+
+  ## UTILS
+
+  def reply(from, payload, meta \\ [])
+  def reply(%{reply_to: :undefined}, _, _), do: :noop
+  def reply(%{ch: ch, reply_to: reply_to}, payload, meta) do
+    AMQP.Basic.publish(ch, "", reply_to, payload, meta)
   end
 end

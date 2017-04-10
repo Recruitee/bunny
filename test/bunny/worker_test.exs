@@ -26,7 +26,7 @@ defmodule Bunny.WorkerTest do
     on_exit fn -> verify_stubs() end
 
     {:ok, state} = Worker.init({:conn, mod: Callback, queue: "x"})
-    meta = %{delivery_tag: 1, headers: :undefined, content_type: :undefined}
+    meta = %{delivery_tag: 1, headers: :undefined, content_type: :undefined, reply_to: :undefined}
 
     {:ok, state: state, meta: meta}
   end
