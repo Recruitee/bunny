@@ -13,4 +13,14 @@ defmodule Bunny do
   def server_url do
     Application.get_env(:bunny, :server_url, "amqp://localhost")
   end
+
+  ## UTILS
+
+  def header(%{headers: :undefined}, _), do: nil
+  def header(%{headers: headers}, key) do
+    Enum.find_value headers, fn
+      {^key, _, value}  -> value
+      _                 -> nil
+    end
+  end
 end

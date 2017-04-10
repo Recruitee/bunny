@@ -131,7 +131,7 @@ defmodule Bunny.Worker do
       # In case of error
       {:EXIT, ^pid, _reason} ->
         # Push the message into retry queue
-        retries = meta_retries(meta)
+        retries = Bunny.header(meta, "x-bunny-retries") || 0
         exp = expiration(retries)
         options =
           meta
@@ -159,17 +159,6 @@ defmodule Bunny.Worker do
     round(:math.pow(count, 4)) + (:rand.uniform(10) * (count + 1)) * 1_000
   end
 
-  defp meta_retries(meta) do
-    meta_header(meta, "x-bunny-retries") || 0
-  end
-
-  defp meta_header(%{headers: :undefined}, _), do: nil
-  defp meta_header(%{headers: headers}, key) do
-    Enum.find_value headers, fn
-      {^key, _, value}  -> value
-      _                 -> nil
-    end
-  end
 
   ## UTILS
 
