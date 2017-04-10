@@ -20,7 +20,7 @@ defmodule Bunny.Mixfile do
 
       # dev & test
       {:mix_test_watch, "~> 0.2", only: :dev},
-      {:twin, path: "~/code/twin"},
+      {:twin, github: "recruitee/twin"},
     ]
   end
 end
