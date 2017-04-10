@@ -156,7 +156,7 @@ defmodule Bunny.Worker do
   end
 
   defp expiration(count) do
-    round(:math.pow(count, 4)) + (:rand.uniform(10) * (count + 1)) * 1_000
+    round(:math.pow(count, 4)) + (:rand.uniform(2) * (count + 1)) * 1_000
   end
 
 

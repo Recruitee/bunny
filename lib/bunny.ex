@@ -1,13 +1,17 @@
 defmodule Bunny do
   import Supervisor.Spec, warn: false
 
-  def start(_type, _args) do
+  def start_link(specs) do
     children = [
-      worker(Bunny.Connection, [])
+      worker(Bunny.Connection, [specs])
     ]
 
-    opts = [strategy: :one_for_one, name: Bunny.Supervisor]
+    opts = [strategy: :one_for_all, name: Bunny.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  def stop(pid) do
+    Supervisor.stop(pid)
   end
 
   def server_url do
