@@ -1,6 +1,6 @@
 defmodule Bunny.Worker do
   ## BEHAVIOUR SPEC
-  @callback handle_message(payload :: binary, meta :: map) :: :ok | {:ok, any} | {:reply, any, keyword}
+  @callback handle_message(payload :: binary, meta :: map) :: any
 
 
   # ## UNNECESSARY MACRO SUGAR
@@ -21,7 +21,6 @@ defmodule Bunny.Worker do
 
   use GenServer
   require Logger
-  # alias Bunny.Helpers
 
   def start_link(%AMQP.Connection{} = conn, opts) do
     GenServer.start_link(__MODULE__, {conn, opts}, [])
@@ -115,7 +114,7 @@ defmodule Bunny.Worker do
 
     # Then, spawn a process for calling calback module
     pid = spawn_link fn ->
-      from = %{ch: state.ch, reply_to: meta.reply_to}
+      from = %{ch: state.ch, reply_to: meta.reply_to, correlation_id: meta.correlation_id}
       apply(state.mod, :handle_message, [payload, meta, from])
     end
 
@@ -164,7 +163,7 @@ defmodule Bunny.Worker do
 
   def reply(from, payload, meta \\ [])
   def reply(%{reply_to: :undefined}, _, _), do: :noop
-  def reply(%{ch: ch, reply_to: reply_to}, payload, meta) do
-    AMQP.Basic.publish(ch, "", reply_to, payload, meta)
+  def reply(%{ch: ch, reply_to: reply_to, correlation_id: cid}, payload, meta) when is_binary(payload) do
+    AMQP.Basic.publish(ch, "", reply_to, payload, meta ++ [correlation_id: cid])
   end
 end
