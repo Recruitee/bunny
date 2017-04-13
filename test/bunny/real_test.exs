@@ -28,16 +28,6 @@ defmodule Bunny.RealTest do
     end
   end
 
-  setup_all do
-    # setup queues
-    {:ok, conn} = AMQP.Connection.open(Bunny.server_url)
-    {:ok, pid} = Bunny.Worker.start_link(conn, mod: Callback, queue: "bunny.test")
-    Bunny.Worker.stop(pid)
-    AMQP.Connection.close(conn)
-
-    :ok
-  end
-
   setup do
     # register current test process as :exunit_current_test
     # there is no need to unregister - it will be unregistered
@@ -48,9 +38,12 @@ defmodule Bunny.RealTest do
     {:ok, conn} = AMQP.Connection.open(Bunny.server_url)
     {:ok, ch} = AMQP.Channel.open(conn)
 
-    # purge test queues
-    AMQP.Queue.purge(ch, "bunny.test")
-    AMQP.Queue.purge(ch, "bunny.test.retry")
+    # delete test queues
+    AMQP.Queue.delete(ch, "bunny.test")
+    AMQP.Queue.delete(ch, "bunny.test.retry")
+
+    # recreate queues
+    Bunny.Worker.setup_queues(ch, "bunny.test", "bunny.test.retry")
 
     # close channel and connection after test
     on_exit fn ->

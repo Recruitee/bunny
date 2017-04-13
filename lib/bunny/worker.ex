@@ -57,14 +57,7 @@ defmodule Bunny.Worker do
     Process.link(ch.pid)
     @amqp_basic.qos(ch, prefetch_count: prefetch)
 
-    # create main task queue
-    {:ok, _} = @amqp_queue.declare(ch, queue, durable: true)
-
-    # create retry queue
-    {:ok, _} = @amqp_queue.declare(ch, queue_retry, durable: true, arguments: [
-      {"x-dead-letter-exchange",    :longstr, ""},
-      {"x-dead-letter-routing-key", :longstr, queue}
-    ])
+    setup_queues(ch, queue, queue_retry)
 
     # subscribe to messages
     {:ok, tag} = @amqp_basic.consume(ch, queue)
@@ -78,6 +71,17 @@ defmodule Bunny.Worker do
       queue_retry:  queue_retry,
       timeout:      timeout
     }}
+  end
+
+  def setup_queues(ch, queue, queue_retry) do
+    # create main task queue
+    {:ok, _} = @amqp_queue.declare(ch, queue, durable: true)
+
+    # create retry queue
+    {:ok, _} = @amqp_queue.declare(ch, queue_retry, durable: true, arguments: [
+      {"x-dead-letter-exchange",    :longstr, ""},
+      {"x-dead-letter-routing-key", :longstr, queue}
+    ])
   end
 
   # AMQP callbacks
