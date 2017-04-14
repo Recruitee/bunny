@@ -16,7 +16,7 @@ defmodule Bunny.Mixfile do
 
   defp deps do
     [
-      {:amqp, "~> 0.2.0-pre.1"},
+      {:amqp, "~> 0.2.0"},
 
       # dev & test
       {:mix_test_watch, "~> 0.2", only: :dev},

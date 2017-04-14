@@ -1,6 +1,6 @@
-%{"amqp": {:hex, :amqp, "0.2.0-pre.2", "01863a61a5db3a370a5d1668e4730669962f204de19f6e915a07550f16c3d3f9", [:mix], [{:amqp_client, "~> 3.6.7-pre.1", [hex: :amqp_client, optional: false]}, {:rabbit_common, "~> 3.6.7-pre.1", [hex: :rabbit_common, optional: false]}]},
-  "amqp_client": {:hex, :amqp_client, "3.6.8", "0388e50af78285f370f0b346cd487c96dcf82c66f2196913073ee4d909808c89", [:make, :rebar3], [{:rabbit_common, "3.6.8", [hex: :rabbit_common, optional: false]}]},
+%{"amqp": {:hex, :amqp, "0.2.0", "ec41c4327ca7c9b1ac0baabb824d47f77a14754bed89b69bb9d32041642d59a3", [:mix], [{:amqp_client, "~> 3.6.8", [hex: :amqp_client, optional: false]}, {:rabbit_common, "~> 3.6.8", [hex: :rabbit_common, optional: false]}]},
+  "amqp_client": {:hex, :amqp_client, "3.6.9", "076d7c68abc670d1bb44bbc357e4fba991a3ab53ce6160ec43576c653849a643", [:make, :rebar3], [{:rabbit_common, "3.6.9", [hex: :rabbit_common, optional: false]}]},
   "fs": {:hex, :fs, "2.12.0", "ad631efacc9a5683c8eaa1b274e24fa64a1b8eb30747e9595b93bec7e492e25e", [:rebar3], []},
   "mix_test_watch": {:hex, :mix_test_watch, "0.3.3", "70859889a8d1d43d1b75d69d87258a301f43209a17787cdb2bd9cab42adf271d", [:mix], [{:fs, "~> 2.12", [hex: :fs, optional: false]}]},
-  "rabbit_common": {:hex, :rabbit_common, "3.6.8", "43bae839233d6ecdf8a06c1af3a985cfdb5d76232ec6e1cbe7d0469c4e5f03f5", [:make, :rebar3], []},
+  "rabbit_common": {:hex, :rabbit_common, "3.6.9", "d54e1bc366f5f553a75055dfc6c93f0025efee0322f98bdf8597aff8482b996d", [:make, :rebar3], []},
   "twin": {:git, "https://github.com/recruitee/twin.git", "12790009fed17f9bcc00e12eb2b3cd164443baf0", []}}
