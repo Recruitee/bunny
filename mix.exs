@@ -17,6 +17,14 @@ defmodule Bunny.Mixfile do
   defp deps do
     [
       {:amqp, "~> 0.2.0"},
+      {:rabbit_common, github: "rabbitmq/rabbitmq-common", 
+                       tag: "v3.7.0-rc.1", 
+                       compile: "make clean all",
+                       override: true},
+      {:lager, "3.5.1"},
+      {:jsx, "2.8.2"}, 
+      {:ranch, "1.3.2", override: true},
+      {:ranch_proxy_protocol, github: "heroku/ranch_proxy_protocol"},
       # dev & test
       {:mix_test_watch, "~> 0.2", only: :dev},
       {:twin, github: "recruitee/twin"},
