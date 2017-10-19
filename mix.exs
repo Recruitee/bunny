@@ -3,7 +3,7 @@ defmodule Bunny.Mixfile do
 
   def project do
     [app: :bunny,
-     version: "0.1.0",
+     version: "0.1.1",
      elixir: "~> 1.3",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
@@ -17,11 +17,6 @@ defmodule Bunny.Mixfile do
   defp deps do
     [
       {:amqp, "~> 0.2.0"},
-      {:rabbit_common,  github: "recruitee/rabbitmq-common",
-                        branch: "mochiweb-rename",
-                        compile: "make clean all",
-                        override: true},
-
       # dev & test
       {:mix_test_watch, "~> 0.2", only: :dev},
       {:twin, github: "recruitee/twin"},
