@@ -17,10 +17,7 @@ defmodule Bunny.Mixfile do
   defp deps do
     [
       {:amqp, "~> 0.2.0"},
-      {:rabbit_common,  github: "recruitee/rabbitmq-common",
-                        branch: "mochiweb-rename",
-                        compile: "make clean all",
-                        override: true},
+      {:rabbit_common,  "~> 3.6.12", override: true},
 
       # dev & test
       {:mix_test_watch, "~> 0.2", only: :dev},
