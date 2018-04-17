@@ -9,8 +9,8 @@ defmodule Bunny.Connection do
 
   ## CLIENT API
 
-  def start_link(specs \\ []) do
-    GenServer.start_link(__MODULE__, specs, name: __MODULE__)
+  def start_link(args \\ []) do
+    GenServer.start_link(__MODULE__, args, name: __MODULE__)
   end
 
   def stop(pid) do
@@ -20,42 +20,58 @@ defmodule Bunny.Connection do
 
   ## CALLBACKS
 
-  def init(specs) do
+  def init(args) do
     send self(), :connect
-    {:ok, %{specs: specs}}
+    opts =
+      %{
+        enable_logger: true
+      }
+      |> Map.merge(Map.new(args))
+    {:ok, opts}
   end
 
   def handle_info(:connect, state) do
     handle_connect(@amqp_connection.open(Bunny.server_url), state)
   end
 
-  def handle_connect({:ok, conn}, %{specs: specs}) do
-    Logger.info "Connected to RabbitMQ at #{Bunny.server_url}"
+  def handle_connect({:ok, conn}, %{specs: specs, enable_logger: enable_logger}) do
+    if enable_logger do
+      Logger.info "Connected to RabbitMQ at #{Bunny.server_url}"
+    end
 
     # link with AMQP connection process
     Process.link(conn.pid)
 
     workers = for spec <- specs do
-      {:ok, worker} = @worker.start_link(conn, spec)
+      {:ok, worker} = @worker.start_link(conn, spec ++ [enable_logger: enable_logger])
       worker
     end
 
-    {:noreply, %{conn: conn, workers: workers, specs: specs}}
+    {:noreply, %{conn: conn, workers: workers, specs: specs, enable_logger: enable_logger}}
   end
 
-  def handle_connect({:error, reason}, %{workers: workers, specs: specs}) do
-    Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
+  def handle_connect({:error, reason}, %{workers: workers, specs: specs, enable_logger: enable_logger}) do
+    if enable_logger do
+      Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
+    end
+
     # stop all workers
     for pid <- workers, do: @worker.stop(pid)
+
     # try to reconnect
     Process.send_after(self(), :connect, @reconnect_delay)
-    {:noreply, %{specs: specs}}
+
+    {:noreply, %{specs: specs, enable_logger: enable_logger}}
   end
 
-  def handle_connect({:error, reason}, state) do
-    Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
+  def handle_connect({:error, reason}, %{enable_logger: enable_logger} = state) do
+    if enable_logger do
+      Logger.warn "Error connecting to RabbitMQ: #{inspect(reason)}"
+    end
+
     # try to reconnect
     Process.send_after(self(), :connect, @reconnect_delay)
+
     {:noreply, state}
   end
 

@@ -1,9 +1,9 @@
 defmodule Bunny do
   import Supervisor.Spec, warn: false
 
-  def start_link(specs) do
+  def start_link(args) do
     children = [
-      worker(Bunny.Connection, [specs])
+      worker(Bunny.Connection, [args])
     ]
 
     opts = [strategy: :one_for_all, name: Bunny.Supervisor]

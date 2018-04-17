@@ -11,7 +11,7 @@ defmodule Bunny.ConnectionTest do
     stub(Bunny.Worker, :stop, :ok) # w2
 
     assert capture_log(fn ->
-      Connection.handle_info(:connect, %{workers: [:w1, :w2], specs: []})
+      Connection.handle_info(:connect, %{workers: [:w1, :w2], specs: [], enable_logger: true})
     end) =~ "warn"
 
     assert_called Bunny.Worker, :stop, [:w1]

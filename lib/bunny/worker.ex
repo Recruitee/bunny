@@ -42,7 +42,9 @@ defmodule Bunny.Worker do
   @amqp_queue   Twin.get(AMQP.Queue)
 
   def init({conn, opts}) do
-    Logger.info "Starting worker: #{inspect(opts)}"
+    if Keyword.get(opts, :enable_logger, true) do
+      Logger.info "Starting worker: #{inspect(opts)}"
+    end
 
     # configuration handling
     mod           = Keyword.fetch!(opts, :mod)

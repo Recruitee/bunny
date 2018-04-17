@@ -56,7 +56,7 @@ defmodule Bunny.RealTest do
 
   test "process message", %{ch: ch} do
     {:ok, conn} = Bunny.start_link([
-      [mod: Callback, queue: "bunny.test"]
+      specs: [mod: Callback, queue: "bunny.test"]
     ])
 
     # publish from another connection
@@ -69,7 +69,7 @@ defmodule Bunny.RealTest do
 
   test "reply to message (via defined reply queue)", %{ch: ch} do
     {:ok, conn} = Bunny.start_link([
-      [mod: Callback, queue: "bunny.test"]
+      specs: [mod: Callback, queue: "bunny.test"]
     ])
 
     {:ok, _} = AMQP.Queue.declare(ch, "bunny.test.replies")
@@ -86,7 +86,7 @@ defmodule Bunny.RealTest do
 
   test "reply to message (via autoreply queue)", %{ch: ch} do
     {:ok, conn} = Bunny.start_link([
-      [mod: Callback, queue: "bunny.test"]
+      specs: [mod: Callback, queue: "bunny.test"]
     ])
 
     # consume from special direct reply-to queue
@@ -103,7 +103,7 @@ defmodule Bunny.RealTest do
 
   test "in case of raise - push message to retry queue with x-bunny-retries header", %{ch: ch} do
     {:ok, conn} = Bunny.start_link([
-      [mod: Callback, queue: "bunny.test"]
+      specs: [mod: Callback, queue: "bunny.test"]
     ])
 
     # consume from retry queue
@@ -122,7 +122,7 @@ defmodule Bunny.RealTest do
 
   test "in case of raise - retry the same message few times", %{ch: ch} do
     {:ok, conn} = Bunny.start_link([
-      [mod: Callback, queue: "bunny.test"]
+      specs: [mod: Callback, queue: "bunny.test"]
     ])
 
     {:ok, tag} = AMQP.Basic.consume(ch, "amq.rabbitmq.reply-to", nil, no_ack: true)
@@ -138,7 +138,7 @@ defmodule Bunny.RealTest do
 
   test "handle bad reply - i.e. error on channel", %{ch: ch} do
     {:ok, conn} = Bunny.start_link([
-      [mod: Callback, queue: "bunny.test"]
+      specs: [mod: Callback, queue: "bunny.test"]
     ])
 
     {:ok, tag} = AMQP.Basic.consume(ch, "amq.rabbitmq.reply-to", nil, no_ack: true)
