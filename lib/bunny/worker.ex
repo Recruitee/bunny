@@ -124,8 +124,8 @@ defmodule Bunny.Worker do
       apply(state.mod, :handle_message, [payload, meta, from])
     end
 
-    # Set a timeout after which that process will be killed
-    :timer.kill_after(60_000, pid)
+    # Set a timeout after which that process will be killed (5 minutes)
+    :timer.kill_after(5*60_000, pid)
 
     # Now wait for EXIT messages
     receive do
